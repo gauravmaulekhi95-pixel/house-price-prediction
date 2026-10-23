@@ -1,0 +1,439 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "id": "880966a0",
+   "metadata": {},
+   "source": [
+    "# House Price Prediction using Machine Learning\n",
+    "\n",
+    "**Goal:** predict the median house value of a California district from features such as median income, house age and location, using regression models.\n",
+    "\n",
+    "**Dataset:** California Housing dataset (built into scikit-learn, 20,640 rows, 8 features). The target `MedHouseVal` is in units of $100,000.\n",
+    "\n",
+    "**Steps:** load data, explore it, clean it, split it, train Linear Regression and Random Forest, evaluate with MAE / RMSE / R², and compare the two models."
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "8445a4c0",
+   "metadata": {},
+   "source": [
+    "## 1. Import libraries"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "fde19037",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import os\n",
+    "import numpy as np\n",
+    "import pandas as pd\n",
+    "import matplotlib.pyplot as plt\n",
+    "import seaborn as sns\n",
+    "\n",
+    "from sklearn.datasets import fetch_california_housing\n",
+    "from sklearn.model_selection import train_test_split, cross_val_score\n",
+    "from sklearn.preprocessing import StandardScaler\n",
+    "from sklearn.pipeline import make_pipeline\n",
+    "from sklearn.linear_model import LinearRegression\n",
+    "from sklearn.ensemble import RandomForestRegressor\n",
+    "from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score\n",
+    "\n",
+    "sns.set_theme(style=\"whitegrid\")\n",
+    "os.makedirs(\"images\", exist_ok=True)\n",
+    "os.makedirs(\"results\", exist_ok=True)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "c9c7bedc",
+   "metadata": {},
+   "source": [
+    "## 2. Load the dataset"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "d3c211d3",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "housing = fetch_california_housing(as_frame=True)\n",
+    "df = housing.frame\n",
+    "print(\"Shape:\", df.shape)\n",
+    "df.head()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "f5ffacd8",
+   "metadata": {},
+   "source": [
+    "| Column | Meaning |\n",
+    "| --- | --- |\n",
+    "| MedInc | Median income in the block group |\n",
+    "| HouseAge | Median house age |\n",
+    "| AveRooms | Average number of rooms per household |\n",
+    "| AveBedrms | Average number of bedrooms per household |\n",
+    "| Population | Block group population |\n",
+    "| AveOccup | Average number of household members |\n",
+    "| Latitude, Longitude | Location of the block group |\n",
+    "| MedHouseVal | **Target**: median house value (in $100,000s) |"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "8e6aca4d",
+   "metadata": {},
+   "source": [
+    "## 3. Understand the data"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "c80dd4f7",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "df.info()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "5c50bab6",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "df.describe().T"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "3a9b5703",
+   "metadata": {},
+   "source": [
+    "## 4. Data cleaning\n",
+    "\n",
+    "First check for missing values and duplicate rows."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "827be099",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "print(\"Missing values per column:\")\n",
+    "print(df.isnull().sum())\n",
+    "print(\"\\nDuplicate rows:\", df.duplicated().sum())"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "9b9d6be5",
+   "metadata": {},
+   "source": [
+    "`AveRooms`, `AveBedrms`, `Population` and `AveOccup` contain extreme values (for example, districts with hundreds of rooms per household). These outliers can distort the Linear Regression model, so they are capped at the 1st and 99th percentiles instead of being deleted."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "f9dec776",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "df_clean = df.copy()\n",
+    "outlier_cols = [\"AveRooms\", \"AveBedrms\", \"Population\", \"AveOccup\"]\n",
+    "\n",
+    "for col in outlier_cols:\n",
+    "    low, high = df_clean[col].quantile([0.01, 0.99])\n",
+    "    df_clean[col] = df_clean[col].clip(low, high)\n",
+    "\n",
+    "df_clean[outlier_cols].describe().T"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "7c8e21a1",
+   "metadata": {},
+   "source": [
+    "## 5. Exploratory data analysis (EDA)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "c78e262a",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "plt.figure(figsize=(7, 4))\n",
+    "sns.histplot(df_clean[\"MedHouseVal\"], bins=40, kde=True)\n",
+    "plt.title(\"Distribution of house prices (in $100,000s)\")\n",
+    "plt.xlabel(\"MedHouseVal\")\n",
+    "plt.tight_layout()\n",
+    "plt.savefig(\"images/price_distribution.png\", dpi=150)\n",
+    "plt.show()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "5ee004c2",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "plt.figure(figsize=(9, 7))\n",
+    "sns.heatmap(df_clean.corr(), annot=True, fmt=\".2f\", cmap=\"coolwarm\", square=True)\n",
+    "plt.title(\"Correlation heatmap\")\n",
+    "plt.tight_layout()\n",
+    "plt.savefig(\"images/correlation_heatmap.png\", dpi=150)\n",
+    "plt.show()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "1c151d81",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "plt.figure(figsize=(7, 4))\n",
+    "sns.scatterplot(data=df_clean.sample(3000, random_state=42), x=\"MedInc\", y=\"MedHouseVal\", alpha=0.4)\n",
+    "plt.title(\"Median income vs house price\")\n",
+    "plt.tight_layout()\n",
+    "plt.savefig(\"images/income_vs_price.png\", dpi=150)\n",
+    "plt.show()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "854018ba",
+   "metadata": {},
+   "source": [
+    "**Observations**\n",
+    "- Median income (`MedInc`) shows the strongest positive correlation with house price.\n",
+    "- Prices are capped at 5.0 ($500,000) in this dataset, which is visible as a spike at the right end of the histogram."
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "75a288dd",
+   "metadata": {},
+   "source": [
+    "## 6. Split the data\n",
+    "\n",
+    "80% of the data is used for training and 20% for testing."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "31197397",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "X = df_clean.drop(columns=\"MedHouseVal\")\n",
+    "y = df_clean[\"MedHouseVal\"]\n",
+    "\n",
+    "X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)\n",
+    "print(\"Train size:\", X_train.shape, \"| Test size:\", X_test.shape)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "469994b3",
+   "metadata": {},
+   "source": [
+    "## 7. Train the models\n",
+    "\n",
+    "- **Linear Regression** is the simple baseline. Features are scaled first with `StandardScaler`.\n",
+    "- **Random Forest** is an ensemble of decision trees that can learn non-linear patterns. It does not need scaling."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "e6b95f60",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "lin_reg = make_pipeline(StandardScaler(), LinearRegression())\n",
+    "rf_reg = RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1)\n",
+    "\n",
+    "lin_reg.fit(X_train, y_train)\n",
+    "rf_reg.fit(X_train, y_train)\n",
+    "print(\"Models trained.\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "412111a1",
+   "metadata": {},
+   "source": [
+    "## 8. Evaluate the models\n",
+    "\n",
+    "Metrics used on the test set:\n",
+    "- **MAE**: average absolute error (in $100,000s)\n",
+    "- **RMSE**: square root of the mean squared error, penalises large errors more\n",
+    "- **R²**: share of the variance in prices explained by the model (1.0 is perfect)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "1ef8cf52",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def evaluate(name, model):\n",
+    "    pred = model.predict(X_test)\n",
+    "    return {\n",
+    "        \"Model\": name,\n",
+    "        \"MAE\": mean_absolute_error(y_test, pred),\n",
+    "        \"RMSE\": np.sqrt(mean_squared_error(y_test, pred)),\n",
+    "        \"R2\": r2_score(y_test, pred),\n",
+    "    }\n",
+    "\n",
+    "results = pd.DataFrame([\n",
+    "    evaluate(\"Linear Regression\", lin_reg),\n",
+    "    evaluate(\"Random Forest\", rf_reg),\n",
+    "]).round(3)\n",
+    "\n",
+    "results.to_csv(\"results/metrics.csv\", index=False)\n",
+    "results"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "a5578a0f",
+   "metadata": {},
+   "source": [
+    "### 5-fold cross-validation (R²)\n",
+    "\n",
+    "Cross-validation checks that the result does not depend on one lucky train/test split."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "fa67a777",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "cv_rows = []\n",
+    "for name, model in [(\"Linear Regression\", lin_reg), (\"Random Forest\", rf_reg)]:\n",
+    "    scores = cross_val_score(model, X, y, cv=5, scoring=\"r2\")\n",
+    "    cv_rows.append({\"Model\": name, \"Mean CV R2\": scores.mean().round(3), \"Std\": scores.std().round(3)})\n",
+    "\n",
+    "cv_results = pd.DataFrame(cv_rows)\n",
+    "cv_results.to_csv(\"results/cross_validation.csv\", index=False)\n",
+    "cv_results"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "a4e15124",
+   "metadata": {},
+   "source": [
+    "## 9. Visualise the predictions"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "7d053a55",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharex=True, sharey=True)\n",
+    "for ax, (name, model) in zip(axes, [(\"Linear Regression\", lin_reg), (\"Random Forest\", rf_reg)]):\n",
+    "    pred = model.predict(X_test)\n",
+    "    ax.scatter(y_test, pred, alpha=0.3, s=10)\n",
+    "    ax.plot([0, 5], [0, 5], color=\"red\", linestyle=\"--\", label=\"Perfect prediction\")\n",
+    "    ax.set_title(name)\n",
+    "    ax.set_xlabel(\"Actual price\")\n",
+    "    ax.set_ylabel(\"Predicted price\")\n",
+    "    ax.legend()\n",
+    "plt.tight_layout()\n",
+    "plt.savefig(\"images/actual_vs_predicted.png\", dpi=150)\n",
+    "plt.show()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "8f0fe21b",
+   "metadata": {},
+   "source": [
+    "## 10. Feature importance (Random Forest)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "71a6cf10",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "importance = pd.Series(rf_reg.feature_importances_, index=X.columns).sort_values()\n",
+    "\n",
+    "plt.figure(figsize=(7, 4))\n",
+    "importance.plot(kind=\"barh\")\n",
+    "plt.title(\"Random Forest feature importance\")\n",
+    "plt.xlabel(\"Importance\")\n",
+    "plt.tight_layout()\n",
+    "plt.savefig(\"images/feature_importance.png\", dpi=150)\n",
+    "plt.show()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "7669f246",
+   "metadata": {},
+   "source": [
+    "## 11. Conclusion"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "86047425",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "best = results.sort_values(\"R2\", ascending=False).iloc[0]\n",
+    "print(f\"Best model on the test set: {best['Model']} (R2 = {best['R2']}, MAE = {best['MAE']}, RMSE = {best['RMSE']})\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "0be0a2a6",
+   "metadata": {},
+   "source": [
+    "- The two models were compared on the same test set using MAE, RMSE and R², and checked again with 5-fold cross-validation.\n",
+    "- Linear Regression is fast and easy to interpret, but it can only learn linear relationships.\n",
+    "- Random Forest can capture non-linear patterns and interactions between features, and its feature importance shows which inputs matter most.\n",
+    "\n",
+    "**Possible improvements:** hyperparameter tuning with `GridSearchCV`, trying Gradient Boosting or XGBoost, and adding new features such as rooms per person."
+   ]
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3",
+   "language": "python",
+   "name": "python3"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 5
+}
